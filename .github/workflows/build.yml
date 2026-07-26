@@ -1,0 +1,22 @@
+name: Test GitHub Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Show Windows version
+        run: systeminfo
+
+      - name: Create test file
+        run: |
+          echo GitHub runner works > test.txt
+
+      - name: Upload test result
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result
+          path: test.txt
