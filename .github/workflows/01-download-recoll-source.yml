@@ -1,0 +1,23 @@
+name: Download Recoll Source
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: windows-latest
+
+    steps:
+      - name: Download official Recoll source
+        run: |
+          git clone https://github.com/recoll/recoll.git
+
+      - name: Create source zip
+        run: |
+          powershell Compress-Archive -Path recoll -DestinationPath recoll-source.zip
+
+      - name: Upload source zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: recoll-source
+          path: recoll-source.zip
