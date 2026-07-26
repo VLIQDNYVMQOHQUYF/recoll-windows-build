@@ -16,7 +16,17 @@ jobs:
           choco install cmake git -y
           choco install libxml2 -y
           choco install xsltproc -y
+          choco install zlib -y
+          choco install openssl -y
+          choco install sqlite -y
           choco install boost-msvc-14.3 -y
+          choco install aspell -y
+          choco install aspell-en -y
+          
+          # Set environment variables for libraries
+          echo "LIBXML2_DIR=C:\tools\libxml2" >> $env:GITHUB_ENV
+          echo "ZLIB_DIR=C:\tools\zlib" >> $env:GITHUB_ENV
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $env:GITHUB_ENV
 
       - name: Extract source from repository
         run: |
@@ -39,7 +49,10 @@ jobs:
       - name: Configure with CMake
         run: |
           cd build
-          cmake -G "MinGW Makefiles" ../recoll-src
+          cmake -G "MinGW Makefiles" `
+            -DCMAKE_PREFIX_PATH="C:\tools\libxml2;C:\tools\zlib;C:\Program Files\OpenSSL-Win64" `
+            -DCMAKE_BUILD_TYPE=Release `
+            ../recoll-src
 
       - name: Build Release
         run: |
