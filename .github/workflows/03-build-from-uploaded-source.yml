@@ -14,11 +14,11 @@ jobs:
       - name: Install build dependencies
         run: |
           choco install cmake git -y
-          choco install mingw -y
+          choco install msys2 -y
           
-          # Download pre-built Windows libraries
-          curl -L -o libxml2-win64.zip https://github.com/winlibs/mingw/releases/download/12.2.0-16.0.6-11.0.0-msvcrt-r2/winlibs-x86_64-posix-seh-gcc-12.2.0-mingw-w64msvcrt-11.0.0-r2.zip
-          Expand-Archive -Path libxml2-win64.zip -DestinationPath C:\mingw-libs
+          # Update MSYS2 and install gcc
+          C:\tools\msys64\usr\bin\bash -lc "pacman -Syu --noconfirm"
+          C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake libxml2"
           
           cmake --version
           gcc --version
