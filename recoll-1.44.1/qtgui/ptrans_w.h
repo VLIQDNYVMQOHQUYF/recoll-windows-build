@@ -1,0 +1,53 @@
+/* Copyright (C) 2006-2025 J.F.Dockes
+ *   This program is free software; you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation; either version 2 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program; if not, write to the
+ *   Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+#ifndef _PTRANS_W_H_INCLUDED_
+#define _PTRANS_W_H_INCLUDED_
+
+#include <string>
+
+#include <QDialog>
+
+#include "ui_ptrans.h"
+
+class QTableWidgetItem;
+
+class PTransEdit : public QDialog, public Ui::PTransEditBase
+{
+    Q_OBJECT
+
+public:
+    // @param dbddir is the initial dbdir to select. May be empty.
+    PTransEdit(const std::string& dbdir, QWidget* parent = 0)
+        : QDialog(parent) {
+        setupUi(this);
+        init(dbdir);
+    }
+
+    void setCurrentDb(const std::string &dbdir);
+                                                                                        
+public slots:
+    virtual void curIdxChanged(const QString& text);
+    virtual void onItemDoubleClicked(QTableWidgetItem *);
+    virtual void savePB_clicked();
+    virtual void addPB_clicked();
+    virtual void delPB_clicked();
+    virtual void transTW_itemSelectionChanged();
+private:
+    virtual void init(const std::string& dbdir);
+};
+
+#endif /* _PTRANS_W_H_INCLUDED_ */
