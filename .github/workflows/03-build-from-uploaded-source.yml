@@ -1,0 +1,119 @@
+name: Build Recoll Portable from Uploaded Source
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          choco install cmake git -y
+
+      - name: Extract source from repository
+        run: |
+          # List files to verify
+          dir
+          # Extract the tar.gz file
+          tar -xzf recoll-1.44.1.tar.gz
+          # Rename extracted folder for consistency
+          $folders = Get-ChildItem -Directory -Filter "recoll-*"
+          if ($folders) {
+            Rename-Item -Path $folders[0].FullName -NewName "recoll-src"
+          }
+
+      - name: Create build directory
+        run: |
+          mkdir build
+          cd build
+          pwd
+
+      - name: Configure with CMake
+        run: |
+          cd build
+          cmake -G "Visual Studio 17 2022" -A x64 ../recoll-src
+
+      - name: Build Release
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Create Portable Package Structure
+        run: |
+          $portableDir = "recoll-portable"
+          New-Item -ItemType Directory -Path "$portableDir\bin" -Force
+          New-Item -ItemType Directory -Path "$portableDir\lib" -Force
+          New-Item -ItemType Directory -Path "$portableDir\share" -Force
+          New-Item -ItemType Directory -Path "$portableDir\config" -Force
+          
+          # Copy built executables and libraries
+          Copy-Item -Path "build\Release\*.exe" -Destination "$portableDir\bin\" -ErrorAction SilentlyContinue
+          Copy-Item -Path "build\Release\*.dll" -Destination "$portableDir\lib\" -ErrorAction SilentlyContinue
+          Copy-Item -Path "build\bin\*.exe" -Destination "$portableDir\bin\" -ErrorAction SilentlyContinue
+          Copy-Item -Path "build\lib\*.dll" -Destination "$portableDir\lib\" -ErrorAction SilentlyContinue
+          
+          # Create launcher script
+          $batchContent = @'
+          @echo off
+          setlocal enabledelayedexpansion
+          set SCRIPTDIR=%~dp0
+          set RECOLL_HOME=%SCRIPTDIR%
+          set RECOLL_DATADIR=%SCRIPTDIR%share
+          set RECOLL_CONFDIR=%SCRIPTDIR%config
+          set PATH=%SCRIPTDIR%bin;%SCRIPTDIR%lib;%PATH%
+          
+          if "%1"=="" (
+              start "Recoll" "%SCRIPTDIR%bin\recoll.exe"
+          ) else (
+              "%SCRIPTDIR%bin\recoll.exe" %*
+          )
+          '@
+          
+          $batchContent | Out-File -FilePath "$portableDir\recoll.bat" -Encoding ASCII
+          
+          # Create README
+          $readmeContent = @'
+          # Recoll Windows Portable (1.44.1)
+          
+          ## Quick Start
+          
+          Double-click `recoll.bat` to launch Recoll.
+          
+          ## Contents
+          
+          - `bin/` - Recoll executables
+          - `lib/` - Required libraries (.dll files)
+          - `share/` - Data files
+          - `config/` - Configuration directory
+          - `recoll.bat` - Launcher script
+          
+          ## Usage
+          
+          ```
+          recoll.bat              # Launch GUI
+          recoll.bat -h           # Show help
+          ```
+          
+          ## Configuration
+          
+          Configuration files are stored in the `config/` folder within this portable package.
+          '@
+          
+          $readmeContent | Out-File -FilePath "$portableDir\README.md" -Encoding UTF8
+
+      - name: Create ZIP Package
+        run: |
+          Compress-Archive -Path "recoll-portable\*" -DestinationPath "recoll-1.44.1-portable.zip" -Force
+          dir recoll-1.44.1-portable.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: recoll-portable-exe
+          path: recoll-1.44.1-portable.zip
+          retention-days: 90
