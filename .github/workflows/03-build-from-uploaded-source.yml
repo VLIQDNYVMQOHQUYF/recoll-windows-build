@@ -20,7 +20,7 @@ jobs:
           # List files to verify
           dir
           # Extract the tar.gz file
-          tar -xzf recoll-1.44.1.tar.gz
+          tar -xzf .github/workflows/recoll-1.44.1.tar.gz
           # Rename extracted folder for consistency
           $folders = Get-ChildItem -Directory -Filter "recoll-*"
           if ($folders) {
