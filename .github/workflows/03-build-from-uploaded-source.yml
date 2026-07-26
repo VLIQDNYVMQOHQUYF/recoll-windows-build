@@ -15,8 +15,16 @@ jobs:
         run: |
           choco install cmake git -y
           choco install mingw-w64 -y
-          choco install libxml2 -y
-          choco install zlib -y
+          
+          # Install vcpkg for proper Windows dependencies
+          git clone https://github.com/Microsoft/vcpkg.git
+          cd vcpkg
+          .\bootstrap-vcpkg.bat
+          
+          # Install required libraries
+          .\vcpkg install libxml2:x64-mingw-dynamic zlib:x64-mingw-dynamic
+          cd ..
+          
           cmake --version
           gcc --version
           
@@ -28,6 +36,7 @@ jobs:
           cd build
           cmake -G "MinGW Makefiles" `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake `
             -DCMAKE_CXX_FLAGS="-static-libgcc -static-libstdc++" `
             ../recoll-1.44.1
 
