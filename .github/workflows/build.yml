@@ -1,22 +1,27 @@
-name: Test GitHub Runner
+name: Download Official Recoll Source
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  download:
     runs-on: windows-latest
 
     steps:
-      - name: Show Windows version
-        run: systeminfo
-
-      - name: Create test file
+      - name: Clone official Recoll repository
         run: |
-          echo GitHub runner works > test.txt
+          git clone https://github.com/recoll/recoll.git
 
-      - name: Upload test result
+      - name: Show downloaded files
+        run: |
+          dir recoll
+
+      - name: Create ZIP archive
+        run: |
+          powershell Compress-Archive -Path recoll -DestinationPath recoll-source.zip
+
+      - name: Upload source archive
         uses: actions/upload-artifact@v4
         with:
-          name: test-result
-          path: test.txt
+          name: recoll-source
+          path: recoll-source.zip
