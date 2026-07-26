@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Download official Recoll source
         run: |
-          git clone https://github.com/recoll/recoll.git
+          curl -L https://www.recoll.org/recoll-1.44.0.tar.gz -o recoll.tar.gz
 
       - name: Create source zip
         run: |
