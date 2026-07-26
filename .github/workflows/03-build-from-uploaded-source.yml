@@ -15,28 +15,11 @@ jobs:
         run: |
           choco install cmake git -y
           choco install mingw-w64 -y
-          
-          # Verify installations
           cmake --version
           gcc --version
 
-      - name: Extract source from repository
-        run: |
-          # List files to verify
-          dir
-          # Extract the tar.gz file
-          tar -xzf .github/workflows/recoll-1.44.1.tar.gz
-          # Rename extracted folder for consistency
-          $folders = Get-ChildItem -Directory -Filter "recoll-*"
-          if ($folders) {
-            Rename-Item -Path $folders[0].FullName -NewName "recoll-src"
-          }
-
       - name: Create build directory
-        run: |
-          mkdir build
-          cd build
-          pwd
+        run: mkdir build
 
       - name: Configure with CMake
         run: |
@@ -44,7 +27,7 @@ jobs:
           cmake -G "MinGW Makefiles" `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_CXX_FLAGS="-static-libgcc -static-libstdc++" `
-            ../recoll-src
+            ../recoll-1.44.1
 
       - name: Build Release
         run: |
@@ -59,13 +42,11 @@ jobs:
           New-Item -ItemType Directory -Path "$portableDir\share" -Force
           New-Item -ItemType Directory -Path "$portableDir\config" -Force
           
-          # Copy built executables and libraries
           Copy-Item -Path "build\Release\*.exe" -Destination "$portableDir\bin\" -ErrorAction SilentlyContinue
           Copy-Item -Path "build\Release\*.dll" -Destination "$portableDir\lib\" -ErrorAction SilentlyContinue
           Copy-Item -Path "build\bin\*.exe" -Destination "$portableDir\bin\" -ErrorAction SilentlyContinue
           Copy-Item -Path "build\lib\*.dll" -Destination "$portableDir\lib\" -ErrorAction SilentlyContinue
           
-          # Create launcher script
           $batchContent = @'
           @echo off
           setlocal enabledelayedexpansion
@@ -84,32 +65,11 @@ jobs:
           
           $batchContent | Out-File -FilePath "$portableDir\recoll.bat" -Encoding ASCII
           
-          # Create README
           $readmeContent = @'
           # Recoll Windows Portable (1.44.1)
           
           ## Quick Start
-          
           Double-click `recoll.bat` to launch Recoll.
-          
-          ## Contents
-          
-          - `bin/` - Recoll executables
-          - `lib/` - Required libraries (.dll files)
-          - `share/` - Data files
-          - `config/` - Configuration directory
-          - `recoll.bat` - Launcher script
-          
-          ## Usage
-          
-          ```
-          recoll.bat              # Launch GUI
-          recoll.bat -h           # Show help
-          ```
-          
-          ## Configuration
-          
-          Configuration files are stored in the `config/` folder within this portable package.
           '@
           
           $readmeContent | Out-File -FilePath "$portableDir\README.md" -Encoding UTF8
@@ -117,7 +77,6 @@ jobs:
       - name: Create ZIP Package
         run: |
           Compress-Archive -Path "recoll-portable\*" -DestinationPath "recoll-1.44.1-portable.zip" -Force
-          dir recoll-1.44.1-portable.zip
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
