@@ -14,6 +14,9 @@ jobs:
       - name: Install build dependencies
         run: |
           choco install cmake git -y
+          choco install libxml2 -y
+          choco install xsltproc -y
+          choco install boost-msvc-14.3 -y
 
       - name: Extract source from repository
         run: |
