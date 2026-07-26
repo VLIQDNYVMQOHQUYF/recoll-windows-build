@@ -13,15 +13,12 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          choco install cmake git mingw-w64-x86_64-toolchain -y
-          choco install pkgconfiglite -y
-          choco install libxml2 libxml2-devel -y
-          choco install zlib zlib-devel -y
-          choco install openssl openssl-devel -y
+          choco install cmake git -y
+          choco install mingw-w64 -y
           
-          # Create pkg-config environment
-          $env:PKG_CONFIG_PATH = "C:\tools\libxml2\lib\pkgconfig"
-          echo "PKG_CONFIG_PATH=C:\tools\libxml2\lib\pkgconfig" >> $env:GITHUB_ENV
+          # Verify installations
+          cmake --version
+          gcc --version
 
       - name: Extract source from repository
         run: |
@@ -41,13 +38,13 @@ jobs:
           cd build
           pwd
 
-            - name: Configure with CMake
-          run: |
+      - name: Configure with CMake
+        run: |
           cd build
           cmake -G "MinGW Makefiles" `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_FIND_DEBUG_MODE=ON `
-            ../recoll-src 2>&1 | Tee-Object -FilePath cmake-output.log
+            -DCMAKE_CXX_FLAGS="-static-libgcc -static-libstdc++" `
+            ../recoll-src
 
       - name: Build Release
         run: |
