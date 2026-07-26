@@ -14,7 +14,7 @@ jobs:
       - name: Install build dependencies
         run: |
           choco install cmake git -y
-          choco install mingw-w64 -y
+          choco install mingw -y
           
           # Download pre-built Windows libraries
           curl -L -o libxml2-win64.zip https://github.com/winlibs/mingw/releases/download/12.2.0-16.0.6-11.0.0-msvcrt-r2/winlibs-x86_64-posix-seh-gcc-12.2.0-mingw-w64msvcrt-11.0.0-r2.zip
