@@ -15,9 +15,11 @@ jobs:
         run: |
           choco install cmake git -y
           choco install mingw-w64 -y
+          choco install libxml2 -y
+          choco install zlib -y
           cmake --version
           gcc --version
-
+          
       - name: Create build directory
         run: mkdir build
 
