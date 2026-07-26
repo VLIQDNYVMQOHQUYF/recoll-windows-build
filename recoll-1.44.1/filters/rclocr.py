@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+#################################
+# Copyright (C) 2020 J.F.Dockes
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the
+#   Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+########################################################
+
+# Running OCR programs for Recoll. This is executed from,
+# e.g. rclpdf.py if pdftotext returns no data.
+#
+# The script tries to retrieve the data from the ocr cache, else it
+# runs the configured OCR program and updates the cache. In both cases it writes
+# the resulting text to stdout.
+
+import os
+import sys
+import atexit
+import signal
+import importlib.util
+
+import rclconfig
+import conftree
+import rclocrcache
+
+from rclexecm import logmsg as _deb
+from cmdtalk import breakwrite
+
+ocrcleanupmodule = None
+
+@atexit.register
+def finalcleanup():
+    if ocrcleanupmodule:
+        ocrcleanupmodule.cleanocr()
+
+
+def signal_handler(sig, frame):
+    sys.exit(1)
+
+
+# Not all signals necessary exist on all systems, use catch
+try:
+    signal.signal(signal.SIGHUP, signal_handler)
+except:
+    pass
+try:
+    signal.signal(signal.SIGINT, signal_handler)
+except:
+    pass
+try:
+    signal.signal(signal.SIGQUIT, signal_handler)
+except:
+    pass
+try:
+    signal.signal(signal.SIGTERM, signal_handler)
+except:
+    pass
+
+
+def Usage():
+    _deb("Usage: rclocr.py <imagefilename>", 2)
+    sys.exit(1)
+
+
+if len(sys.argv) != 2:
+    Usage()
+
+path = sys.argv[1]
+
+config = rclconfig.RclConfig()
+config.setKeyDir(os.path.dirname(path))
+
+cache = rclocrcache.OCRCache(config)
+
+incache, data = cache.get(path)
+if incache:
+    try:
+        breakwrite(sys.stdout.buffer, data)
+    except Exception as e:
+        _deb(f"Error writing: {e}", 2)
+        sys.exit(1)
+    sys.exit(0)
+
+#### Data not in cache
+
+# Retrieve configured OCR program names and try to load the
+# corresponding module
+ocrprogs = config.getConfParam("ocrprogs")
+if ocrprogs is None:
+    # Compat: the previous version has no ocrprogs variable, but would do
+    # tesseract by default. Use "ocrprogs = " for a really empty list
+    ocrprogs = "tesseract"
+if not ocrprogs:
+    _deb("No ocrprogs variable in recoll configuration", 2)
+    sys.exit(0)
+
+_deb(f"ocrprogs: {ocrprogs}")
+
+proglist = conftree.stringToStrings(ocrprogs)
+ok = False
+for ocrprog in proglist:
+    try:
+        modulename = "rclocr" + ocrprog
+        ocr = importlib.import_module(modulename)
+        if ocr.ocrpossible(config, path):
+            ok = True
+            break
+    except Exception as err:
+        _deb(f"While loading {modulename}: got: {err}", 2)
+        pass
+
+if not ok:
+    _deb("No OCR module could be loaded", 2)
+    sys.exit(1)
+
+_deb(f"Using ocr module {modulename}")
+
+# The OCR module will retrieve its specific parameters from the
+# configuration
+ocrcleanupmodule = ocr
+status = None
+try:
+    status, data = ocr.runocr(config, path)
+except:
+    pass
+if not status:
+    _deb("runocr failed", 2)
+    sys.exit(1)
+
+cache.store(path, data)
+sys.stdout.buffer.write(data)
+sys.exit(0)
