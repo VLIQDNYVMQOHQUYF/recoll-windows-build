@@ -45,8 +45,8 @@ jobs:
           "Qt_installer_size=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
 
             - name: Setup MSYS2 (MINGW64) and install toolchain + deps
-         uses: msys2/setup-msys2@v2
-        with:
+          uses: msys2/setup-msys2@v2
+          with:
           msystem: MINGW64
           install: >
             mingw-w64-x86_64-toolchain
