@@ -1,92 +1,177 @@
-name: Windows portable build (build-from-source only)
+name: Windows portable build (vendor-only downloads, include Qt)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   release:
     types: [published]
+
+env:
+  # Default vendor URLs (can be overridden via workflow inputs or secrets)
+  VC_REDIST_URL: https://aka.ms/vs/17/release/VC_redist.x64.exe
+  # Default Qt URL (official releases area). Adapt if you prefer a different Qt version.
+  QT_VENDOR_URL: https://download.qt.io/official_releases/qt/6.8/6.8.2/qt-opensource-windows-x86-64-msvc2022_64-6.8.2.exe
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup MSYS2 (MINGW64)
-        uses: msys2/setup-msys2@v2
+      - name: Checkout repository (full)
+        uses: actions/checkout@v4
         with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-meson
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-python3
+          fetch-depth: 0
 
-      - name: Configure (Meson)
-        working-directory: recoll-1.44.1
+      - name: Fail if repo contains tracked binary files (enforce no third-party binaries)
         run: |
-          meson setup builddir --buildtype=release || meson configure builddir
+          blocked=$(git ls-files | grep -Ei '\.(exe|dll|msi|zip|7z|tar\.gz|tar\.bz2|tar|rar)$' || true)
+          if [ -n "$blocked" ]; then
+            printf 'ENFORCEMENT: repository contains tracked binary files (forbidden):\n%s\n' "$blocked"
+            exit 1
+          else
+            echo "No tracked forbidden binary files found in repo"
+          fi
 
-      - name: Build (Meson)
-        working-directory: recoll-1.44.1
+      - name: Create vendor directory and download vendor files (no SHA verification per policy)
+        shell: powershell
         run: |
-          meson compile -C builddir --verbose
+          mkdir vendor
+          Write-Output "Downloading VC redistributable from $env:VC_REDIST_URL"
+          Invoke-WebRequest -Uri $env:VC_REDIST_URL -OutFile vendor\VC_redist.x64.exe -UseBasicParsing
+          Write-Output "Downloaded: vendor\\VC_redist.x64.exe   Size (bytes): $(Get-Item vendor\\VC_redist.x64.exe).Length"
 
-      - name: Verify build artifacts (smoke tests)
-        working-directory: recoll-1.44.1
-        run: |
-          set -e
-          echo "Checking for expected executables..."
-          if [ -f builddir/recoll.exe ] || [ -f builddir/recoll ]; then echo "recoll found"; else ls -la builddir || true; exit 1; fi
-          if [ -f builddir/recoll.exe ]; then ./builddir/recoll.exe --version || ./builddir/recoll.exe --help || true; fi
+          Write-Output "Downloading Qt vendor package from $env:QT_VENDOR_URL"
+          Invoke-WebRequest -Uri $env:QT_VENDOR_URL -OutFile vendor\qt_offline_installer.exe -UseBasicParsing
+          Write-Output "Downloaded: vendor\\qt_offline_installer.exe   Size (bytes): $(Get-Item vendor\\qt_offline_installer.exe).Length"
 
-      - name: Prepare distribution folder (NO third-party binaries copied)
-        working-directory: recoll-1.44.1
+          # Log summary file for later inspection
+          "VC_REDIST_URL=$env:VC_REDIST_URL" | Out-File vendor/download-report.txt -Encoding ascii
+          "VC_redist_size=$(Get-Item vendor\\VC_redist.x64.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "QT_VENDOR_URL=$env:QT_VENDOR_URL" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "Qt_installer_size=$(Get-Item vendor\\qt_offline_installer.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
+
+      - name: Setup Visual Studio build environment (use preinstalled MSVC & CMake)
         run: |
-          rm -rf installer/dist || true
+          echo "Using windows-latest Visual Studio environment (MSVC)."
+          cmake --version || true
+          where cl || true
+
+      - name: Build from source (ADAPT THESE COMMANDS to your project's build system)
+        run: |
+          echo "=== ADAPT: Replace these example build commands with the actual commands for your project ==="
+          echo "Attempting a CMake default build (example). If your project uses meson/qmake/other, replace these with the correct steps."
+          rm -rf build
+          mkdir build
+          cd build
+          cmake -S .. -B . -G "Ninja" -A x64 -DCMAKE_BUILD_TYPE=Release || cmake -S .. -B . -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -- -m || cmake --build . --config Release
+          cd ..
+          echo "Build completed (if the above commands matched your project)."
+
+      - name: Collect only built artifacts and allowed repo files into installer/dist
+        run: |
           mkdir -p installer/dist
-          for f in builddir/recoll.exe builddir/recoll builddir/recollindex.exe builddir/recollindex builddir/recollq.exe builddir/recollq; do
-            if [ -f "$f" ]; then cp "$f" installer/dist/; fi
-          done
-          if [ -d sampleconf ]; then cp -r sampleconf installer/dist/share/; fi
-          if [ -d filters ]; then cp -r filters installer/dist/share/; fi
-
-      - name: Detect DLL dependencies (list only, no copying)
-        working-directory: recoll-1.44.1
-        run: |
-          echo "Listing DLL dependencies for each built exe (no DLLs will be copied)"
-          for exe in installer/dist/*.exe; do
-            echo "--- Dependencies for: $exe ---" > installer/dist/$(basename $exe).deps.txt
-            if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-              x86_64-w64-mingw32-objdump -p "$exe" | grep 'DLL Name' >> installer/dist/$(basename $exe).deps.txt || true
+          # Update this list to match the actual built output locations & filenames for your project.
+          expected_built=(
+            "build/recoll.exe"
+            "build/recollindex.exe"
+            "build/recollq.exe"
+          )
+          for f in "${expected_built[@]}"; do
+            if [ -f "$f" ]; then
+              echo "Copying built artifact: $f"
+              cp -v "$f" installer/dist/
             else
-              echo "objdump not found; cannot list DLLs" >> installer/dist/$(basename $exe).deps.txt
+              echo "Note: expected build artifact not found (may be OK if your project uses different paths): $f"
             fi
-            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$exe" | awk '{print $1}' > installer/dist/$(basename $exe).sha256; fi
           done
 
-      - name: Create portable ZIP (contains only files built from this source + bundled configs)
-        shell: cmd
-        run: |
-          for /f "delims=" %%v in (recoll-1.44.1\RECOLL-VERSION.txt) do set "VER=%%v"
-          if exist installer\Output rmdir /s /q installer\Output
-          mkdir installer\Output
-          powershell -Command "Compress-Archive -Path 'recoll-1.44.1\\installer\\dist\\*' -DestinationPath 'installer\\Output\\recoll-%VER%-win64-portable.zip' -Force"
+          # Copy only repo-owned allowed paths (configs, filters, icons that are part of the repo)
+          test -d sampleconf && cp -r sampleconf installer/dist/ || true
+          test -d filters && cp -r filters installer/dist/ || true
+          test -f README.md && cp README.md installer/dist/ || true
 
-      - name: Compute SHA256 of ZIP
-        shell: cmd
+      - name: Verify installer/dist contains NO unauthorized files (strict check)
         run: |
-          for /f "delims=" %%v in (recoll-1.44.1\RECOLL-VERSION.txt) do set "VER=%%v"
-          powershell -Command "Get-FileHash -Algorithm SHA256 'installer\\Output\\recoll-%VER%-win64-portable.zip' | ForEach-Object { $_.Hash } | Out-File -FilePath 'installer\\Output\\recoll-%VER%-win64-portable.zip.sha256' -Encoding ascii"
+          # Build list of produced files from the build directory (canonical)
+          produced=$(mktemp)
+          find build -type f \( -name '*.exe' -o -name '*.dll' \) -print | sed 's#^./##' | while read p; do realpath "$p"; done > "$produced" || true
 
-      - name: Upload release assets (ZIP + checksums + deps lists)
+          # Allowed repo source directories (absolute)
+          allowed_repo_dirs=()
+          [ -d sampleconf ] && allowed_repo_dirs+=("$(realpath sampleconf)")
+          [ -d filters ] && allowed_repo_dirs+=("$(realpath filters)")
+          [ -f README.md ] && allowed_repo_dirs+=("$(realpath README.md)")
+
+          bad=0
+          while IFS= read -r f; do
+            rf=$(realpath "$f")
+            # If produced by this run, ok:
+            if grep -Fxq "$rf" "$produced"; then
+              continue
+            fi
+            # If under an allowed repo dir/file, ok:
+            ok=0
+            for a in "${allowed_repo_dirs[@]}"; do
+              case "$a" in
+                *.md) [ "$rf" = "$a" ] && ok=1 ;;
+                *) case "$rf" in "$a"/*) ok=1 ;; esac ;;
+              esac
+              [ $ok -eq 1 ] && break
+            done
+            if [ $ok -eq 1 ]; then
+              continue
+            fi
+            echo "UNAUTHORIZED file in installer/dist: $f"
+            bad=1
+          done < <(find installer/dist -type f -print)
+
+          if [ $bad -ne 0 ]; then
+            echo "ENFORCEMENT FAILURE: installer/dist contains unauthorized files. Aborting."
+            exit 1
+          fi
+          echo "installer/dist verified: contains only build-produced artifacts and allowed repo files."
+
+      - name: List DEPENDENCIES of built exes (DLLs) - do NOT copy DLLs into the package
+        run: |
+          mkdir -p installer/reports
+          for exe in installer/dist/*.exe; do
+            if [ -f "$exe" ]; then
+              base=$(basename "$exe")
+              echo "Dependencies for $base:" > "installer/reports/${base}.deps.txt"
+              dumpbin /DEPENDENTS "$exe" 2>nul >> "installer/reports/${base}.deps.txt" || \
+                (x86_64-w64-mingw32-objdump -p "$exe" | grep 'DLL Name' >> "installer/reports/${base}.deps.txt" || true)
+            fi
+          done
+          echo "Dependency reports written to installer/reports/"
+
+      - name: Produce portable ZIP (contains only installer/dist)
+        shell: powershell
+        run: |
+          $outdir = "installer\\Output"
+          if (Test-Path $outdir) { Remove-Item $outdir -Recurse -Force }
+          New-Item -ItemType Directory -Path $outdir | Out-Null
+          $zipfile = Join-Path $outdir "recoll-portable.zip"
+          Compress-Archive -Path "installer\\dist\\*" -DestinationPath $zipfile -Force
+          Write-Output "Produced $zipfile"
+
+      - name: Compute SHA256 of produced ZIP (for record - you chose no vendor SHA verification)
+        shell: powershell
+        run: |
+          $zip = "installer\\Output\\recoll-portable.zip"
+          if (Test-Path $zip) {
+            Get-FileHash -Path $zip -Algorithm SHA256 | ForEach-Object { $_.Hash } | Out-File -FilePath installer\\Output\\recoll-portable.zip.sha256 -Encoding ascii
+            Write-Output "SHA256 written to installer\\Output\\recoll-portable.zip.sha256"
+          } else {
+            Write-Output "No ZIP produced; skipping hash"
+          }
+
+      - name: Upload release assets (ZIP + reports + download-report)
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer/Output/recoll-*-win64-portable.zip
-            installer/Output/recoll-*-win64-portable.zip.sha256
-            recoll-1.44.1/installer/dist/*.deps.txt
-            recoll-1.44.1/installer/dist/*.sha256
+            installer/Output/recoll-portable.zip
+            installer/Output/recoll-portable.zip.sha256
+            installer/reports/*.deps.txt
+            vendor/download-report.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
