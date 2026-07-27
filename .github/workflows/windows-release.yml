@@ -1,0 +1,92 @@
+name: Windows portable build (build-from-source only)
+
+on:
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python3
+
+      - name: Configure (Meson)
+        working-directory: recoll-1.44.1
+        run: |
+          meson setup builddir --buildtype=release || meson configure builddir
+
+      - name: Build (Meson)
+        working-directory: recoll-1.44.1
+        run: |
+          meson compile -C builddir --verbose
+
+      - name: Verify build artifacts (smoke tests)
+        working-directory: recoll-1.44.1
+        run: |
+          set -e
+          echo "Checking for expected executables..."
+          if [ -f builddir/recoll.exe ] || [ -f builddir/recoll ]; then echo "recoll found"; else ls -la builddir || true; exit 1; fi
+          if [ -f builddir/recoll.exe ]; then ./builddir/recoll.exe --version || ./builddir/recoll.exe --help || true; fi
+
+      - name: Prepare distribution folder (NO third-party binaries copied)
+        working-directory: recoll-1.44.1
+        run: |
+          rm -rf installer/dist || true
+          mkdir -p installer/dist
+          for f in builddir/recoll.exe builddir/recoll builddir/recollindex.exe builddir/recollindex builddir/recollq.exe builddir/recollq; do
+            if [ -f "$f" ]; then cp "$f" installer/dist/; fi
+          done
+          if [ -d sampleconf ]; then cp -r sampleconf installer/dist/share/; fi
+          if [ -d filters ]; then cp -r filters installer/dist/share/; fi
+
+      - name: Detect DLL dependencies (list only, no copying)
+        working-directory: recoll-1.44.1
+        run: |
+          echo "Listing DLL dependencies for each built exe (no DLLs will be copied)"
+          for exe in installer/dist/*.exe; do
+            echo "--- Dependencies for: $exe ---" > installer/dist/$(basename $exe).deps.txt
+            if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
+              x86_64-w64-mingw32-objdump -p "$exe" | grep 'DLL Name' >> installer/dist/$(basename $exe).deps.txt || true
+            else
+              echo "objdump not found; cannot list DLLs" >> installer/dist/$(basename $exe).deps.txt
+            fi
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$exe" | awk '{print $1}' > installer/dist/$(basename $exe).sha256; fi
+          done
+
+      - name: Create portable ZIP (contains only files built from this source + bundled configs)
+        shell: cmd
+        run: |
+          for /f "delims=" %%v in (recoll-1.44.1\RECOLL-VERSION.txt) do set "VER=%%v"
+          if exist installer\Output rmdir /s /q installer\Output
+          mkdir installer\Output
+          powershell -Command "Compress-Archive -Path 'recoll-1.44.1\\installer\\dist\\*' -DestinationPath 'installer\\Output\\recoll-%VER%-win64-portable.zip' -Force"
+
+      - name: Compute SHA256 of ZIP
+        shell: cmd
+        run: |
+          for /f "delims=" %%v in (recoll-1.44.1\RECOLL-VERSION.txt) do set "VER=%%v"
+          powershell -Command "Get-FileHash -Algorithm SHA256 'installer\\Output\\recoll-%VER%-win64-portable.zip' | ForEach-Object { $_.Hash } | Out-File -FilePath 'installer\\Output\\recoll-%VER%-win64-portable.zip.sha256' -Encoding ascii"
+
+      - name: Upload release assets (ZIP + checksums + deps lists)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/Output/recoll-*-win64-portable.zip
+            installer/Output/recoll-*-win64-portable.zip.sha256
+            recoll-1.44.1/installer/dist/*.deps.txt
+            recoll-1.44.1/installer/dist/*.sha256
