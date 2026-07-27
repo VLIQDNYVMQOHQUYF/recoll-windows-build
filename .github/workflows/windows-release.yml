@@ -13,7 +13,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-
       - name: Checkout repository (full)
         uses: actions/checkout@v4
         with:
@@ -30,22 +29,20 @@ jobs:
             echo "No tracked forbidden binary files found in repo"
           fi
 
-      - name: Create vendor directory and download vendor files (no SHA verification per policy)
+      - name: Create vendor directory and download vendor files (no SHA verification, skip Qt)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path vendor -Force | Out-Null
+
           Write-Output "Downloading VC redistributable from $env:VC_REDIST_URL"
           Invoke-WebRequest -Uri $env:VC_REDIST_URL -OutFile vendor\VC_redist.x64.exe -UseBasicParsing
           Write-Output "Downloaded: vendor\VC_redist.x64.exe   Size (bytes): $(Get-Item vendor\VC_redist.x64.exe).Length"
 
-          Write-Output "Downloading Qt vendor package from $env:QT_VENDOR_URL"
-          Invoke-WebRequest -Uri $env:QT_VENDOR_URL -OutFile vendor\qt_offline_installer.exe -UseBasicParsing
-          Write-Output "Downloaded: vendor\qt_offline_installer.exe   Size (bytes): $(Get-Item vendor\qt_offline_installer.exe).Length"
-
+          # Record download report; Qt is intentionally skipped to avoid large downloads/builds in CI
           "VC_REDIST_URL=$env:VC_REDIST_URL" | Out-File vendor/download-report.txt -Encoding ascii
           "VC_redist_size=$(Get-Item vendor\VC_redist.x64.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
-          "QT_VENDOR_URL=$env:QT_VENDOR_URL" | Out-File vendor/download-report.txt -Append -Encoding ascii
-          "Qt_installer_size=$(Get-Item vendor\qt_offline_installer.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "QT_VENDOR_URL=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "Qt_installer_size=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
 
       - name: Setup Visual Studio build environment (use preinstalled MSVC & CMake)
         shell: pwsh
