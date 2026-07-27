@@ -6,9 +6,7 @@ on:
     types: [published]
 
 env:
-  # Default vendor URLs (can be overridden via workflow inputs or secrets)
   VC_REDIST_URL: https://aka.ms/vs/17/release/VC_redist.x64.exe
-  # Default Qt URL (official releases area). Adapt if you prefer a different Qt version.
   QT_VENDOR_URL: https://download.qt.io/official_releases/qt/6.8/6.8.2/qt-opensource-windows-x86-64-msvc2022_64-6.8.2.exe
 
 jobs:
@@ -22,6 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fail if repo contains tracked binary files (enforce no third-party binaries)
+        shell: bash
         run: |
           blocked=$(git ls-files | grep -Ei '\.(exe|dll|msi|zip|7z|tar\.gz|tar\.bz2|tar|rar)$' || true)
           if [ -n "$blocked" ]; then
@@ -32,45 +31,44 @@ jobs:
           fi
 
       - name: Create vendor directory and download vendor files (no SHA verification per policy)
-        shell: powershell
+        shell: pwsh
         run: |
-          mkdir vendor
+          New-Item -ItemType Directory -Path vendor -Force | Out-Null
           Write-Output "Downloading VC redistributable from $env:VC_REDIST_URL"
           Invoke-WebRequest -Uri $env:VC_REDIST_URL -OutFile vendor\VC_redist.x64.exe -UseBasicParsing
-          Write-Output "Downloaded: vendor\\VC_redist.x64.exe   Size (bytes): $(Get-Item vendor\\VC_redist.x64.exe).Length"
+          Write-Output "Downloaded: vendor\VC_redist.x64.exe   Size (bytes): $(Get-Item vendor\VC_redist.x64.exe).Length"
 
           Write-Output "Downloading Qt vendor package from $env:QT_VENDOR_URL"
           Invoke-WebRequest -Uri $env:QT_VENDOR_URL -OutFile vendor\qt_offline_installer.exe -UseBasicParsing
-          Write-Output "Downloaded: vendor\\qt_offline_installer.exe   Size (bytes): $(Get-Item vendor\\qt_offline_installer.exe).Length"
+          Write-Output "Downloaded: vendor\qt_offline_installer.exe   Size (bytes): $(Get-Item vendor\qt_offline_installer.exe).Length"
 
-          # Log summary file for later inspection
           "VC_REDIST_URL=$env:VC_REDIST_URL" | Out-File vendor/download-report.txt -Encoding ascii
-          "VC_redist_size=$(Get-Item vendor\\VC_redist.x64.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "VC_redist_size=$(Get-Item vendor\VC_redist.x64.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
           "QT_VENDOR_URL=$env:QT_VENDOR_URL" | Out-File vendor/download-report.txt -Append -Encoding ascii
-          "Qt_installer_size=$(Get-Item vendor\\qt_offline_installer.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
+          "Qt_installer_size=$(Get-Item vendor\qt_offline_installer.exe).Length" | Out-File vendor/download-report.txt -Append -Encoding ascii
 
       - name: Setup Visual Studio build environment (use preinstalled MSVC & CMake)
+        shell: pwsh
         run: |
-          echo "Using windows-latest Visual Studio environment (MSVC)."
-          cmake --version || true
-          where cl || true
+          Write-Output "Using windows-latest Visual Studio environment (MSVC)."
+          cmake --version || $null
+          where cl || $null
 
       - name: Build from source (ADAPT THESE COMMANDS to your project's build system)
+        shell: bash
         run: |
           echo "=== ADAPT: Replace these example build commands with the actual commands for your project ==="
-          echo "Attempting a CMake default build (example). If your project uses meson/qmake/other, replace these with the correct steps."
           rm -rf build
-          mkdir build
+          mkdir -p build
           cd build
           cmake -S .. -B . -G "Ninja" -A x64 -DCMAKE_BUILD_TYPE=Release || cmake -S .. -B . -A x64 -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release -- -m || cmake --build . --config Release
           cd ..
-          echo "Build completed (if the above commands matched your project)."
 
       - name: Collect only built artifacts and allowed repo files into installer/dist
+        shell: bash
         run: |
           mkdir -p installer/dist
-          # Update this list to match the actual built output locations & filenames for your project.
           expected_built=(
             "build/recoll.exe"
             "build/recollindex.exe"
@@ -81,35 +79,28 @@ jobs:
               echo "Copying built artifact: $f"
               cp -v "$f" installer/dist/
             else
-              echo "Note: expected build artifact not found (may be OK if your project uses different paths): $f"
+              echo "Note: expected build artifact not found: $f"
             fi
           done
-
-          # Copy only repo-owned allowed paths (configs, filters, icons that are part of the repo)
-          test -d sampleconf && cp -r sampleconf installer/dist/ || true
-          test -d filters && cp -r filters installer/dist/ || true
-          test -f README.md && cp README.md installer/dist/ || true
+          [ -d sampleconf ] && cp -r sampleconf installer/dist/ || true
+          [ -d filters ] && cp -r filters installer/dist/ || true
+          [ -f README.md ] && cp README.md installer/dist/ || true
 
       - name: Verify installer/dist contains NO unauthorized files (strict check)
+        shell: bash
         run: |
-          # Build list of produced files from the build directory (canonical)
           produced=$(mktemp)
-          find build -type f \( -name '*.exe' -o -name '*.dll' \) -print | sed 's#^./##' | while read p; do realpath "$p"; done > "$produced" || true
-
-          # Allowed repo source directories (absolute)
+          find build -type f \( -name '*.exe' -o -name '*.dll' \) -print | while read p; do realpath "$p"; done > "$produced" || true
           allowed_repo_dirs=()
           [ -d sampleconf ] && allowed_repo_dirs+=("$(realpath sampleconf)")
           [ -d filters ] && allowed_repo_dirs+=("$(realpath filters)")
           [ -f README.md ] && allowed_repo_dirs+=("$(realpath README.md)")
-
           bad=0
           while IFS= read -r f; do
             rf=$(realpath "$f")
-            # If produced by this run, ok:
             if grep -Fxq "$rf" "$produced"; then
               continue
             fi
-            # If under an allowed repo dir/file, ok:
             ok=0
             for a in "${allowed_repo_dirs[@]}"; do
               case "$a" in
@@ -124,43 +115,42 @@ jobs:
             echo "UNAUTHORIZED file in installer/dist: $f"
             bad=1
           done < <(find installer/dist -type f -print)
-
           if [ $bad -ne 0 ]; then
             echo "ENFORCEMENT FAILURE: installer/dist contains unauthorized files. Aborting."
             exit 1
           fi
           echo "installer/dist verified: contains only build-produced artifacts and allowed repo files."
 
-      - name: List DEPENDENCIES of built exes (DLLs) - do NOT copy DLLs into the package
+      - name: List DEPENDENCIES of built exes (DLLs) - write reports (PowerShell)
+        shell: pwsh
         run: |
-          mkdir -p installer/reports
-          for exe in installer/dist/*.exe; do
-            if [ -f "$exe" ]; then
-              base=$(basename "$exe")
-              echo "Dependencies for $base:" > "installer/reports/${base}.deps.txt"
-              dumpbin /DEPENDENTS "$exe" 2>nul >> "installer/reports/${base}.deps.txt" || \
-                (x86_64-w64-mingw32-objdump -p "$exe" | grep 'DLL Name' >> "installer/reports/${base}.deps.txt" || true)
-            fi
-          done
-          echo "Dependency reports written to installer/reports/"
+          New-Item -ItemType Directory -Path installer/reports -Force | Out-Null
+          $exeFiles = Get-ChildItem -Path installer/dist -Filter *.exe -File -ErrorAction SilentlyContinue
+          foreach ($exe in $exeFiles) {
+            $base = $exe.Name
+            $out = "installer/reports/$($base).deps.txt"
+            "Dependencies for $base:" | Out-File $out -Encoding ascii
+            & dumpbin /DEPENDENTS $exe.FullName 2>$null | Out-File -Append $out -Encoding ascii
+          }
+          Write-Output "Dependency reports written to installer/reports/"
 
       - name: Produce portable ZIP (contains only installer/dist)
-        shell: powershell
+        shell: pwsh
         run: |
-          $outdir = "installer\\Output"
+          $outdir = "installer\Output"
           if (Test-Path $outdir) { Remove-Item $outdir -Recurse -Force }
           New-Item -ItemType Directory -Path $outdir | Out-Null
           $zipfile = Join-Path $outdir "recoll-portable.zip"
-          Compress-Archive -Path "installer\\dist\\*" -DestinationPath $zipfile -Force
+          Compress-Archive -Path "installer\dist\*" -DestinationPath $zipfile -Force
           Write-Output "Produced $zipfile"
 
-      - name: Compute SHA256 of produced ZIP (for record - you chose no vendor SHA verification)
-        shell: powershell
+      - name: Compute SHA256 of produced ZIP (for record)
+        shell: pwsh
         run: |
-          $zip = "installer\\Output\\recoll-portable.zip"
+          $zip = "installer\Output\recoll-portable.zip"
           if (Test-Path $zip) {
-            Get-FileHash -Path $zip -Algorithm SHA256 | ForEach-Object { $_.Hash } | Out-File -FilePath installer\\Output\\recoll-portable.zip.sha256 -Encoding ascii
-            Write-Output "SHA256 written to installer\\Output\\recoll-portable.zip.sha256"
+            Get-FileHash -Path $zip -Algorithm SHA256 | ForEach-Object { $_.Hash } | Out-File -FilePath installer\Output\recoll-portable.zip.sha256 -Encoding ascii
+            Write-Output "SHA256 written to installer\Output\recoll-portable.zip.sha256"
           } else {
             Write-Output "No ZIP produced; skipping hash"
           }
