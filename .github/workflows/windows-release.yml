@@ -1,4 +1,4 @@
-name: Windows portable build (vendor-only downloads, include Qt)
+name: Windows portable build (skip Qt in CI, build Meson CLI)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
 
 env:
   VC_REDIST_URL: https://aka.ms/vs/17/release/VC_redist.x64.exe
-  QT_VENDOR_URL: https://download.qt.io/official_releases/qt/6.8/6.8.2/qt-opensource-windows-x86-64-msvc2022_64-6.8.2.exe
+  QT_VENDOR_URL: SKIPPED
 
 jobs:
   build-windows:
@@ -29,7 +29,7 @@ jobs:
             echo "No tracked forbidden binary files found in repo"
           fi
 
-      - name: Create vendor directory and download vendor files (no SHA verification, skip Qt)
+      - name: Create vendor directory and download VC redistributable (skip Qt)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path vendor -Force | Out-Null
@@ -51,36 +51,29 @@ jobs:
           cmake --version || $null
           where cl || $null
 
-      - name: Build from source (ADAPT THESE COMMANDS to your project's build system)
+      - name: Build from source with Meson (skip Qt GUI in CI)
         shell: bash
         run: |
-          echo "=== ADAPT: Replace these example build commands with the actual commands for your project ==="
+          python -m pip install --upgrade pip
+          pip install meson ninja
           rm -rf build
-          mkdir -p build
-          cd build
-          cmake -S .. -B . -G "Ninja" -A x64 -DCMAKE_BUILD_TYPE=Release || cmake -S .. -B . -A x64 -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release -- -m || cmake --build . --config Release
-          cd ..
+          # configure from the recoll-1.44.1 source dir and disable Qt GUI
+          meson setup build recoll-1.44.1 --buildtype=release -Dqt=false || meson setup build recoll-1.44.1 -Dqt=false
+          meson compile -C build --verbose
+          # install into installer/dist (may create directories)
+          meson install -C build --destdir=installer/dist || true
 
-      - name: Collect only built artifacts and allowed repo files into installer/dist
+      - name: Collect built EXEs and allowed repo files into installer/dist
         shell: bash
         run: |
           mkdir -p installer/dist
-          expected_built=(
-            "build/recoll.exe"
-            "build/recollindex.exe"
-            "build/recollq.exe"
-          )
-          for f in "${expected_built[@]}"; do
-            if [ -f "$f" ]; then
-              echo "Copying built artifact: $f"
-              cp -v "$f" installer/dist/
-            else
-              echo "Note: expected build artifact not found: $f"
-            fi
+          # copy any built .exe from build or installer dist
+          find build installer/dist -type f -iname '*.exe' -print 2>/dev/null | while read f; do
+            cp -u "$f" "installer/dist/$(basename "$f")" || true
           done
-          [ -d sampleconf ] && cp -r sampleconf installer/dist/ || true
-          [ -d filters ] && cp -r filters installer/dist/ || true
+          # copy repo config files that should be packaged
+          [ -d recoll-1.44.1/sampleconf ] && cp -r recoll-1.44.1/sampleconf installer/dist/ || true
+          [ -d recoll-1.44.1/filters ] && cp -r recoll-1.44.1/filters installer/dist/ || true
           [ -f README.md ] && cp README.md installer/dist/ || true
 
       - name: Verify installer/dist contains NO unauthorized files (strict check)
@@ -89,8 +82,8 @@ jobs:
           produced=$(mktemp)
           find build -type f \( -name '*.exe' -o -name '*.dll' \) -print | while read p; do realpath "$p"; done > "$produced" || true
           allowed_repo_dirs=()
-          [ -d sampleconf ] && allowed_repo_dirs+=("$(realpath sampleconf)")
-          [ -d filters ] && allowed_repo_dirs+=("$(realpath filters)")
+          [ -d recoll-1.44.1/sampleconf ] && allowed_repo_dirs+=("$(realpath recoll-1.44.1/sampleconf)")
+          [ -d recoll-1.44.1/filters ] && allowed_repo_dirs+=("$(realpath recoll-1.44.1/filters)")
           [ -f README.md ] && allowed_repo_dirs+=("$(realpath README.md)")
           bad=0
           while IFS= read -r f; do
@@ -111,7 +104,7 @@ jobs:
             fi
             echo "UNAUTHORIZED file in installer/dist: $f"
             bad=1
-          done < <(find installer/dist -type f -print)
+          done < <(find installer/dist -type f -print 2>/dev/null)
           if [ $bad -ne 0 ]; then
             echo "ENFORCEMENT FAILURE: installer/dist contains unauthorized files. Aborting."
             exit 1
