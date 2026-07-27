@@ -87,5 +87,70 @@ jobs:
           bad=0
           while IFS= read -r f; do
             rf=$(realpath "$f")
-            if grep -Fxq](#)
-
+            if grep -Fxq "$rf" "$produced"; then
+              continue
+            fi
+            ok=0
+            for a in "${allowed_repo_dirs[@]}"; do
+              case "$a" in
+                *.md) [ "$rf" = "$a" ] && ok=1 ;;
+                *) case "$rf" in "$a"/*) ok=1 ;; esac ;;
+              esac
+              [ $ok -eq 1 ] && break
+            done
+            if [ $ok -eq 1 ]; then
+              continue
+            fi
+            echo "UNAUTHORIZED file in installer/dist: $f"
+            bad=1
+          done < <(find installer/dist -type f -print 2>/dev/null)
+          if [ $bad -ne 0 ]; then
+            echo "ENFORCEMENT FAILURE: installer/dist contains unauthorized files. Aborting."
+            exit 1
+          fi
+          echo "installer/dist verified: contains only build-produced artifacts and allowed repo files."
+
+      - name: List DEPENDENCIES of built exes (DLLs) - write reports (PowerShell)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path installer/reports -Force | Out-Null
+          $exeFiles = Get-ChildItem -Path installer/dist -Filter *.exe -File -ErrorAction SilentlyContinue
+          foreach ($exe in $exeFiles) {
+            $base = $exe.Name
+            $out = "installer/reports/$($base).deps.txt"
+            "Dependencies for $base:" | Out-File $out -Encoding ascii
+            & dumpbin /DEPENDENTS $exe.FullName 2>$null | Out-File -Append $out -Encoding ascii
+          }
+          Write-Output "Dependency reports written to installer/reports/"
+
+      - name: Produce portable ZIP (contains only installer/dist)
+        shell: pwsh
+        run: |
+          $outdir = "installer\Output"
+          if (Test-Path $outdir) { Remove-Item $outdir -Recurse -Force }
+          New-Item -ItemType Directory -Path $outdir | Out-Null
+          $zipfile = Join-Path $outdir "recoll-portable.zip"
+          Compress-Archive -Path "installer\dist\*" -DestinationPath $zipfile -Force
+          Write-Output "Produced $zipfile"
+
+      - name: Compute SHA256 of produced ZIP (for record)
+        shell: pwsh
+        run: |
+          $zip = "installer\Output\recoll-portable.zip"
+          if (Test-Path $zip) {
+            Get-FileHash -Path $zip -Algorithm SHA256 | ForEach-Object { $_.Hash } | Out-File -FilePath installer\Output\recoll-portable.zip.sha256 -Encoding ascii
+            Write-Output "SHA256 written to installer\Output\recoll-portable.zip.sha256"
+          } else {
+            Write-Output "No ZIP produced; skipping hash"
+          }
+
+      - name: Upload release assets (ZIP + reports + download-report)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/Output/recoll-portable.zip
+            installer/Output/recoll-portable.zip.sha256
+            installer/reports/*.deps.txt
+            vendor/download-report.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
