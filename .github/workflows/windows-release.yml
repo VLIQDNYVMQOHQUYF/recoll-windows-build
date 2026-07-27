@@ -44,8 +44,8 @@ jobs:
           "QT_VENDOR_URL=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
           "Qt_installer_size=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
 
-      - name: Setup MSYS2 (MINGW64) and install toolchain
-        uses: msys2/setup-msys2@v2
+            - name: Setup MSYS2 (MINGW64) and install toolchain + deps
+         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           install: >
@@ -54,9 +54,22 @@ jobs:
             mingw-w64-x86_64-python
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libxml2
+            mingw-w64-x86_64-libxslt
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-libiconv
           update: true
           export-path: true
 
+      - name: Debug pkg-config and libxml2 visibility (MSYS2)
+        shell: bash
+        run: |
+          echo "PATH=$PATH"
+          which pkg-config || true
+          pkg-config --version || true
+          pkg-config --modversion libxml-2.0 || true
+          pkg-config --cflags --libs libxml-2.0 || true
+    
       - name: Ensure meson & ninja installed (MSYS2 python)
         shell: bash
         run: |
