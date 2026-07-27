@@ -44,22 +44,34 @@ jobs:
           "QT_VENDOR_URL=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
           "Qt_installer_size=SKIPPED" | Out-File vendor/download-report.txt -Append -Encoding ascii
 
-      - name: Setup Visual Studio build environment (use preinstalled MSVC & CMake)
-        shell: pwsh
-        run: |
-          Write-Output "Using windows-latest Visual Studio environment (MSVC)."
-          try { cmake --version } catch { Write-Output "cmake not found" }
-          try { where.exe cl } catch { Write-Output "cl not found" }
+      - name: Setup MSYS2 (MINGW64) and install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-ninja
+          update: true
+          export-path: true
 
-      - name: Build from source with Meson (skip Qt GUI in CI)
+      - name: Ensure meson & ninja installed (MSYS2 python)
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install meson ninja
+
+      - name: Build from source with Meson (skip Qt GUI in CI)
+        shell: bash
+        run: |
+          set -e
           rm -rf build
           # configure from the recoll-1.44.1 source dir: disable Qt GUI and enable recollq (CLI)
           meson setup build recoll-1.44.1 --buildtype=release -Dqtgui=false -Drecollq=true || meson setup build recoll-1.44.1 -Dqtgui=false -Drecollq=true
           meson compile -C build --verbose
+          # install into installer/dist (may create directories)
           meson install -C build --destdir=installer/dist || true
 
       - name: Collect built EXEs and allowed repo files into installer/dist
@@ -110,18 +122,24 @@ jobs:
           fi
           echo "installer/dist verified: contains only build-produced artifacts and allowed repo files."
 
-      - name: List DEPENDENCIES of built exes (DLLs) - write reports (PowerShell)
-        shell: pwsh
+      - name: List DEPENDENCIES of built exes (DLLs) - write reports (bash / objdump)
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Path installer/reports -Force | Out-Null
-          $exeFiles = Get-ChildItem -Path installer/dist -Filter *.exe -File -ErrorAction SilentlyContinue
-          foreach ($exe in $exeFiles) {
-            $base = $exe.Name
-            $out = "installer/reports/$($base).deps.txt"
-            "Dependencies for $base:" | Out-File $out -Encoding ascii
-            & dumpbin /DEPENDENTS $exe.FullName 2>$null | Out-File -Append $out -Encoding ascii
-          }
-          Write-Output "Dependency reports written to installer/reports/"
+          mkdir -p installer/reports
+          shopt -s nullglob
+          for exe in installer/dist/*.exe; do
+            base=$(basename "$exe")
+            out="installer/reports/${base}.deps.txt"
+            echo "Dependencies for $base:" > "$out"
+            if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
+              x86_64-w64-mingw32-objdump -p "$exe" 2>/dev/null >> "$out" || echo "objdump failed" >> "$out"
+            elif command -v objdump >/dev/null 2>&1; then
+              objdump -p "$exe" 2>/dev/null >> "$out" || echo "objdump failed" >> "$out"
+            else
+              echo "No objdump or dumpbin available; skipping dependency listing" >> "$out"
+            fi
+          done
+          echo "Dependency reports written to installer/reports/ (if any executables were present)"
 
       - name: Produce portable ZIP (contains only installer/dist)
         shell: pwsh
@@ -130,8 +148,12 @@ jobs:
           if (Test-Path $outdir) { Remove-Item $outdir -Recurse -Force }
           New-Item -ItemType Directory -Path $outdir | Out-Null
           $zipfile = Join-Path $outdir "recoll-portable.zip"
-          Compress-Archive -Path "installer\dist\*" -DestinationPath $zipfile -Force
-          Write-Output "Produced $zipfile"
+          if (Test-Path "installer\dist\*") {
+            Compress-Archive -Path "installer\dist\*" -DestinationPath $zipfile -Force
+            Write-Output "Produced $zipfile"
+          } else {
+            Write-Output "No files in installer\dist; skipping ZIP creation"
+          }
 
       - name: Compute SHA256 of produced ZIP (for record)
         shell: pwsh
